@@ -287,14 +287,29 @@ def get_paper_content(pdf_url):
     """
     Gets the content of the paper from the pdf url
     """
-    all_text = ''
+    pdf_url = pdf_url.replace('abs', 'pdf')
+    response = requests.get(pdf_url)
+    if response.status_code == 200:
+        pdf_content = BytesIO(response.content)
+        temp_pdf_path = 'temp_paper.pdf'
 
-    with pdfplumber.open(pdf_url) as pdf:
-        for page in pdf.pages:
-            text = page.extract_text()
-            all_text += text
+        with open(temp_pdf_path, 'wb') as temp_file:
+            temp_file.write(pdf_content.read())
 
-    return all_text
+        with pdfplumber.open(temp_pdf_path) as pdf:
+            all_text = ''
+            for page in pdf.pages:
+                text = page.extract_text()
+                all_text += text
+
+        try:
+            os.remove(temp_pdf_path)
+        except OSError as e:
+            print(f"Error removing temp file: {e}")
+
+        return all_text
+    else:
+        return None  # Handle error appropriately
 
 
 def summarise_paper(paper_content, model="gpt-3.5-turbo-16k", role="user"):
