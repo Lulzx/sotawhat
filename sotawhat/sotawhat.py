@@ -1,13 +1,19 @@
 import os
 import re
 import sys
+import pdfplumber
 import urllib.error
 import urllib.request
 import warnings
+import requests
+from io import BytesIO
+import openai
+from getpass import getpass
+
 
 import nltk
 from nltk.tokenize import word_tokenize
-from six.moves.html_parser import HTMLParser
+from html import unescape
 from spellchecker import SpellChecker
 
 try:
@@ -15,7 +21,7 @@ try:
 except LookupError:
     nltk.download('punkt')
 
-h = HTMLParser()
+h = unescape
 
 AUTHOR_TAG = '<a href="/search/?searchtype=author'
 TITLE_TAG = '<p class="title is-5 mathjax">'
@@ -36,6 +42,11 @@ def get_authors(lines, i):
         i += 1
     return authors, i
 
+# Source: https://github.com/chiphuyen/sotawhat/pull/33/files
+def extract_first_arxiv_url(html_string):
+    pattern = r'https://arxiv\.org/[^"]+' # Regular expression to match URLs from the arxiv.org domain
+    match = re.search(pattern, html_string)
+    return match.group(0) if match else None
 
 def get_next_result(lines, start):
     """
@@ -51,7 +62,7 @@ def get_next_result(lines, start):
 
     result = {}
     idx = lines[start + 3][10:].find('"')
-    result['main_page'] = lines[start + 3][9:10 + idx]
+    result['main_page'] = extract_first_arxiv_url(lines[start + 3])
     idx = lines[start + 4][23:].find('"')
     result['pdf'] = lines[start + 4][22: 23 + idx] + '.pdf'
 
@@ -183,9 +194,9 @@ def extract_line(abstract, keyword, limit):
 
 def get_report(paper, keyword):
     if keyword in paper['abstract'].lower():
-        title = h.unescape(paper['title'])
+        title = h(paper['title'])
         headline = '{} ({} - {})\n'.format(title, paper['authors'][0], paper['date'])
-        abstract = h.unescape(paper['abstract'])
+        abstract = h(paper['abstract'])
         extract, has_number = extract_line(abstract, keyword, 280 - len(headline))
         if extract:
             report = headline + extract + '\nLink: {}'.format(paper['main_page'])
@@ -272,6 +283,60 @@ def get_papers(keyword, num_results=5):
             all_unshown.extend(unshown)
         page += 1
 
+def get_paper_content(pdf_url):
+    """
+    Gets the content of the paper from the pdf url
+    """
+    all_text = ''
+
+    with pdfplumber.open(pdf_url) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text()
+            all_text += text
+
+    return all_text
+
+
+def summarise_paper(paper_content, model="gpt-3.5-turbo-16k", role="user"):
+    """
+    Summarises the paper content using the OpenAI GPT-3.5 16k model
+    """
+    response = openai.ChatCompletion.create(
+    model=model,
+    messages=[
+        {
+            "role": "system",
+            "content": "You are a text summarising system that provides easy to understand summaries of research papers."
+        },
+        {"role": role,
+         "content": "Summarise paper text in 150 words: " + paper_content
+         }])
+
+    return response["choices"][0]['message']['content']
+
+def key_findings(paper_content, model="gpt-3.5-turbo-16k", role="user"):
+    """
+    Retrieves Key Findings from a paper using OpenAI GPT-3.5 16k model
+    """
+    response = openai.ChatCompletion.create(
+    model=model,
+    messages=[
+        {
+            "role": "system",
+            "content": "You are a academic paper parsing system that provides key findings/learnings of research papers."
+        },
+        {"role": role,
+         "content": "List down the key findings of the paper: " + paper_content
+         }])
+
+    return response["choices"][0]['message']['content']
+
+
+def setup_openai():
+    if 'OPENAI_API_KEY' not in os.environ:
+        openai_api_key = getpass('Please enter your OpenAI API Key: ')
+        os.environ['OPENAI_API_KEY'] = openai_api_key
+
 
 def main():
     if 'nt' in os.name:
@@ -282,6 +347,34 @@ def main():
             warnings.warn('On Windows, encoding errors may arise when displaying the data.\n'
                           'If such errors occur, please install `win_unicode_consolde` via \n'
                           'the command `pip install win-unicode-console`.')
+
+    if len(sys.argv) > 1 and sys.argv[1] == 'summarize':
+
+        setup_openai()
+
+        openai.api_key = os.environ['OPENAI_API_KEY']
+
+        if len(sys.argv) < 3:
+            raise ValueError('You must specify a paper url')
+        paper_url = sys.argv[2]
+        paper_content = get_paper_content(paper_url)
+        paper_summary = summarise_paper(paper_content)
+        print("Paper Summary: \n", paper_summary)
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] == 'keyfindings':
+
+        setup_openai()
+
+        openai.api_key = os.environ['OPENAI_API_KEY']
+
+        if len(sys.argv) < 3:
+            raise ValueError('You must specify a paper url')
+        paper_url = sys.argv[2]
+        paper_content = get_paper_content(paper_url)
+        paper_summary = key_findings(paper_content)
+        print("Key Findings: \n", paper_summary)
+        return
 
     if len(sys.argv) < 2:
         raise ValueError('You must specify a keyword')

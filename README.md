@@ -52,7 +52,7 @@ For example:
 $ sotawhat perplexity 10
 ```
 
-or 
+or
 
 ```bash
 $ sotawhat language model 10
@@ -66,3 +66,20 @@ We've found that this script works well with keywords that are:
 + a task (e.g. language model, machine translation, fuzzing, ...)
 + a metric (e.g. BLEU, perplexity, ...)
 + random stuff
+
+## Summarization
+You can also use the script to summarize a paper using GPT3.5 after you get it's url from the step above. For example:
+
+```bash
+$ sotawhat summarize https://arxiv.org/abs/1809.04281
+```
+
+It uses the gpt-3.5-turbo-16k model and will request for your OpenAI API key. You can get one [here](https://platform.openai.com/signup). The simple prompt will generate a 150 word summary of the paper to help you decide if you want to read further.
+
+You can also use the script to list down the key findings of the paper if you don't feel like leaving the command line interface using:
+
+```bash
+$ sotawhat keyfindings https://arxiv.org/abs/1809.04281
+```
+
+The script works well with papers shorter than 20 pages or so as the max token length is 16k, any paper or document bigger than that might throw an error.
